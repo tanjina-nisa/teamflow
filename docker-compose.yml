@@ -1,0 +1,41 @@
+# One command to run the whole stack locally:
+#   docker compose up --build
+# Web: http://localhost:3000   API: http://localhost:4000   Postgres: localhost:5432
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: teamflow
+    ports: ['5432:5432']
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 3s
+      retries: 20
+
+  api:
+    build: ./apps/api
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@db:5432/teamflow
+      JWT_SECRET: local-dev-secret-change-me
+      CORS_ORIGIN: http://localhost:3000
+    ports: ['4000:4000']
+    volumes: [uploads:/data/uploads]
+    depends_on:
+      db: { condition: service_healthy }
+    # Seed the demo workspace on first start (skips if it already exists)
+    command: sh -c "node dist/seed.js && node dist/main.js"
+
+  web:
+    build:
+      context: ./apps/web
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:4000
+    ports: ['3000:3000']
+    depends_on: [api]
+
+volumes:
+  pgdata:
+  uploads:
