@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  api:
+    name: API · build + e2e tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: teamflow
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: apps/api
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/teamflow
+      JWT_SECRET: ci-secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npm run build
+      - run: node dist/seed.js --reset
+      - name: Start API
+        run: |
+          node dist/main.js > api.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://localhost:4000/health && break; sleep 1; done
+      - run: npm test
+        env:
+          API_URL: http://localhost:4000
+      - if: failure()
+        run: cat api.log
+
+  web:
+    name: Web · typecheck + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npm run lint
+      - run: npm run build
+
+  docker:
+    name: Docker images build
+    runs-on: ubuntu-latest
+    needs: [api, web]
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose build
